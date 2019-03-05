@@ -191,6 +191,16 @@ static uint32_t *fdt_scan_helper(
     }
 }
 
+void keystoneFDT(uint64_t memstart, uint64_t memsize)
+{
+  if (!add_avail_p_reg((p_region_t){
+        memstart, memstart + memsize
+        })) {
+    printf("Failed to add physical memory region %llu-%llu\n", (unsigned long long)memstart,
+        (unsigned long long)(memstart + memsize));
+  }
+}
+
 void parseFDT(void *fdt)
 {
     struct fdt_header *header = (struct fdt_header *)fdt;

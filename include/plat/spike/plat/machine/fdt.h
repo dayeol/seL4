@@ -29,6 +29,7 @@
 #ifndef FDT_H
 #define FDT_H
 
+void keystoneFDT(uint64_t memstart, uint64_t memsize);
 void parseFDT(void *fdt);
 uint32_t fdt_size(void *fdt);
 

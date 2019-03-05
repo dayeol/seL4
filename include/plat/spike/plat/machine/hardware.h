@@ -22,24 +22,39 @@
 #include <config.h>
 #include <plat_mode/machine/hardware.h>
 
-#if __riscv_xlen == 32
+//#if __riscv_xlen == 32
+
 /* Contain the typical location of memory */
-#define PADDR_BASE 0x80000000lu
-#else
+//#define PADDR_BASE 0x80000000lu
+//#else
 /* The main kernel window will start at the 0 physical address so that it can contain
  * any potential memory that may exist */
-#define PADDR_BASE 0x0lu
-#endif
+//#define PADDR_BASE 0x0lu
+//#endif
 
-#ifdef CONFIG_BUILD_ROCKET_CHIP_ZEDBOARD
+extern word_t keystone_paddr_base;
+inline word_t paddr_base(void)
+{
+  return keystone_paddr_base;
+}
+#define PADDR_BASE paddr_base()
+
+//#ifdef CONFIG_BUILD_ROCKET_CHIP_ZEDBOARD
 /* The Rocket-Chip for zedboard only has 256MiB of Memory. */
-#define PADDR_LOAD 0x88000000lu
-#else
+//#define PADDR_LOAD 0x88000000lu
+//#else
 /* This represents the physical address that the kernel image will be linked to. This needs to
  * be on a 1gb boundary as we currently require being able to creating a mapping to this address
  * as the largest frame size */
-#define PADDR_LOAD 0xC0000000lu
-#endif
+//#define PADDR_LOAD 0xC0000000lu
+//#endif
+
+extern word_t keystone_paddr_load;
+inline word_t paddr_load(void)
+{
+  return keystone_paddr_load;
+}
+#define PADDR_LOAD paddr_load()
 
 /* The highest valid physical address that can be indexed in the kernel window */
 #define PADDR_TOP (KERNEL_BASE - PPTR_BASE + PADDR_BASE)

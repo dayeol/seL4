@@ -67,6 +67,15 @@ RISCVGetReadFromVMRights(vm_rights_t vm_rights)
 
 static inline bool_t isPTEPageTable(pte_t *pte)
 {
+  /*
+    printf("pte 0x%p, v:%d,r:%d,w:%d,x:%d\n", 
+        (void*) pte,
+        (int)pte_ptr_get_valid(pte),
+        (int)pte_ptr_get_read(pte),
+        (int)pte_ptr_get_write(pte),
+        (int)pte_ptr_get_execute(pte)
+        );
+        */
     return pte_ptr_get_valid(pte) &&
            !(pte_ptr_get_read(pte) || pte_ptr_get_write(pte) || pte_ptr_get_execute(pte));
 }
@@ -99,48 +108,82 @@ static pte_t pte_next(word_t phys_addr, bool_t is_leaf)
 
 /* ==================== BOOT CODE STARTS HERE ==================== */
 
+/* we need to map PPTR_BASE --> freemem */
 BOOT_CODE VISIBLE void
+keystone_map_kernel_window(word_t dram_start, word_t dram_end)
+{
+    /*Keystone: we map PPTR_BASE to free memory */
+    word_t pptr = PPTR_BASE; /* 0xffffffc000000000 */
+    word_t paddr = dram_start; 
+//    while (pptr < PPTR_BASE + RISCV_GET_LVL_PGSIZE(2)) { /* 0xffffffc000000000 - 0xffffffff80000000 */
+        assert(IS_ALIGNED(pptr, RISCV_GET_LVL_PGSIZE_BITS(2)));
+        assert(IS_ALIGNED(paddr, RISCV_GET_LVL_PGSIZE_BITS(2)));
+
+        /* MAP VA 0xffffffc000000000 --> PA 0x80000000 : up to kernel base */
+        kernel_root_pageTable[RISCV_GET_PT_INDEX(pptr, 1)] =
+          pte_next(kpptr_to_paddr(kernel_root_level2_pageTable), false);
+        while (pptr < PPTR_BASE + (dram_end - dram_start)) {
+          printf("pptr:0x%llx --> paddr:0x%llx\n", (unsigned long long) pptr, (unsigned long long) paddr);
+          kernel_root_level2_pageTable[RISCV_GET_PT_INDEX(pptr,2)] = pte_next(paddr, true);
+          pptr += RISCV_GET_LVL_PGSIZE(2);
+          paddr += RISCV_GET_LVL_PGSIZE(2);
+        }
+   // }
+      //   kernel_root_pageTable[RISCV_GET_PT_INDEX(pptr, 1)] = pte_next(paddr, true);
+    /*
+        pptr += RISCV_GET_LVL_PGSIZE(1);
+        paddr += RISCV_GET_LVL_PGSIZE(1);
+    }*/
+}
+
+  BOOT_CODE VISIBLE void
 map_kernel_window(void)
 {
     /* mapping of kernelBase (virtual address) to kernel's physBase  */
     assert(CONFIG_PT_LEVELS > 1 && CONFIG_PT_LEVELS <= 4);
 
     /* kernel window starts at PPTR_BASE */
-    word_t pptr = PPTR_BASE;
+    word_t pptr = PPTR_BASE; /* 0xffffffc000000000 */
 
     /* first we map in memory from PADDR_BASE */
-    word_t paddr = PADDR_BASE;
-    while (pptr < KERNEL_BASE) {
-        assert(IS_ALIGNED(pptr, RISCV_GET_LVL_PGSIZE_BITS(1)));
+    word_t paddr = PADDR_BASE; /* 0x80000000UL */
+    //while (pptr < KERNEL_BASE) { /* 0xffffffc000000000 - 0xffffffff80000000 */
+    /*    assert(IS_ALIGNED(pptr, RISCV_GET_LVL_PGSIZE_BITS(1)));
         assert(IS_ALIGNED(paddr, RISCV_GET_LVL_PGSIZE_BITS(1)));
-
-        kernel_root_pageTable[RISCV_GET_PT_INDEX(pptr, 1)] = pte_next(paddr, true);
-
+    */
+        /* MAP VA 0xffffffc000000000 --> PA 0x80000000 : up to kernel base */
+     //   kernel_root_pageTable[RISCV_GET_PT_INDEX(pptr, 1)] = pte_next(paddr, true);
+    /*
         pptr += RISCV_GET_LVL_PGSIZE(1);
         paddr += RISCV_GET_LVL_PGSIZE(1);
-    }
-    /* now we should be mapping the 1GiB kernel base, starting again from PADDR_LOAD */
-    assert(pptr == KERNEL_BASE);
-    paddr = PADDR_LOAD;
+    }*/
 
-#ifndef RISCV_KERNEL_WINDOW_LEVEL2_PT
-    kernel_root_pageTable[RISCV_GET_PT_INDEX(pptr, 1)] = pte_next(paddr, true);
-    pptr += RISCV_GET_LVL_PGSIZE(1);
-    paddr += RISCV_GET_LVL_PGSIZE(1);
-#else
-    word_t index = 0;
+    /* now we should be mapping the 1GiB kernel base, starting again from PADDR_LOAD */
+    pptr = KERNEL_BASE;
+    //assert(pptr == KERNEL_BASE);
+    paddr = PADDR_LOAD; /* PA 0xc0000000 */
+
+//#ifndef RISCV_KERNEL_WINDOW_LEVEL2_PT
+    /* MAP VA 0xffffffff80000000 --> PA 0xc0000000 */
+//    kernel_root_pageTable[RISCV_GET_PT_INDEX(pptr, 1)] = pte_next(paddr, true);
+//    pptr += RISCV_GET_LVL_PGSIZE(1);
+//    paddr += RISCV_GET_LVL_PGSIZE(1);
+//#else
     kernel_root_pageTable[RISCV_GET_PT_INDEX(pptr, 1)] =
         pte_next(kpptr_to_paddr(kernel_image_level2_pt), false);
-    while (pptr < KERNEL_BASE + RISCV_GET_LVL_PGSIZE(1)) {
-        kernel_image_level2_pt[index] = pte_next(paddr, true);
-        index++;
-        pptr += RISCV_GET_LVL_PGSIZE(2);
-        paddr += RISCV_GET_LVL_PGSIZE(2);
+    kernel_image_level2_pt[RISCV_GET_PT_INDEX(pptr, 2)] = 
+        pte_next(kpptr_to_paddr(kernel_image_level3_pt), false);
+
+    while (pptr < KERNEL_BASE + RISCV_GET_LVL_PGSIZE(2)) {
+        //printf("pptr:0x%llx --> paddr:0x%llx\n", (unsigned long long) pptr, (unsigned long long) paddr);  
+        kernel_image_level3_pt[RISCV_GET_PT_INDEX(pptr, 3)] = pte_next(paddr, true);
+        pptr += RISCV_GET_LVL_PGSIZE(3);
+        paddr += RISCV_GET_LVL_PGSIZE(3);
     }
-#endif
+//#endif
 
     /* There should be 1GiB free where we will put device mapping some day */
-    assert(pptr == UINTPTR_MAX - RISCV_GET_LVL_PGSIZE(1) + 1);
+    //assert(pptr == UINTPTR_MAX - RISCV_GET_LVL_PGSIZE(1) + 1);
 }
 
 BOOT_CODE void
@@ -159,6 +202,7 @@ map_it_pt_cap(cap_t vspace_cap, cap_t pt_cap)
 
     targetSlot = pt_ret.ptSlot;
 
+    printf("vptr: 0x%lx, addrFromPPtr(pt):0x%lx\n", vptr, addrFromPPtr(pt));
     *targetSlot = pte_new(
                       (addrFromPPtr(pt) >> seL4_PageBits),
                       0, /* sw */
@@ -180,9 +224,20 @@ map_it_frame_cap(cap_t vspace_cap, cap_t frame_cap)
     pte_t* lvl1pt   = PTE_PTR(pptr_of_cap(vspace_cap));
     pte_t* frame_pptr   = PTE_PTR(pptr_of_cap(frame_cap));
     vptr_t frame_vptr = cap_frame_cap_get_capFMappedAddress(frame_cap);
+  
+    if(frame_vptr & 0x100000000)
+      frame_vptr -= 0x100000000;
 
+    //printf("lvl1pt: 0x%llx, frame_pptr: 0x%llx, frame_vptr: 0x%llx\n", 
+    //    (unsigned long long) lvl1pt, 
+    //    (unsigned long long) frame_pptr, 
+    //    (unsigned long long) frame_vptr);
     /* We deal with a frame as 4KiB */
     lookupPTSlot_ret_t lu_ret = lookupPTSlot(lvl1pt, frame_vptr);
+
+    //printf("lu_ret.ptBitsLeft: %d\n", (int) lu_ret.ptBitsLeft);
+
+
     assert(lu_ret.ptBitsLeft == seL4_PageBits);
 
     pte_t* targetSlot = lu_ret.ptSlot;
@@ -264,6 +319,8 @@ create_it_address_space(cap_t root_cnode_cap, v_region_t it_v_reg)
     seL4_SlotPos slot_pos_before = ndks_boot.slot_pos_cur;
     write_slot(SLOT_PTR(pptr_of_cap(root_cnode_cap), seL4_CapInitThreadVSpace), lvl1pt_cap);
 
+    printf("lvl1pt_pptr [0x%llx]\n", 
+        (unsigned long long)lvl1pt_pptr);
     /* create all n level PT objs and caps necessary to cover userland image in 4KiB pages */
 
     for (int i = 2; i <= CONFIG_PT_LEVELS; i++) {
@@ -272,8 +329,9 @@ create_it_address_space(cap_t root_cnode_cap, v_region_t it_v_reg)
                 pt_vptr < it_v_reg.end;
                 pt_vptr += RISCV_GET_LVL_PGSIZE(i - 1)) {
             pt_pptr = alloc_region(PT_SIZE_BITS);
-
+            printf("level: %d [pt_pptr: 0x%llx, pt_vptr:0x%lx]\n", i, (unsigned long long) pt_pptr, pt_vptr);
             if (!pt_pptr) {
+              printf("first one\n");
                 return cap_null_cap_new();
             }
 
@@ -281,6 +339,7 @@ create_it_address_space(cap_t root_cnode_cap, v_region_t it_v_reg)
             if (!provide_cap(root_cnode_cap,
                              create_it_pt_cap(lvl1pt_cap, pt_pptr, pt_vptr, IT_ASID))
                ) {
+              printf("second one\n");
                 return cap_null_cap_new();
             }
         }
@@ -591,6 +650,7 @@ setVMRoot(tcb_t *tcb)
 
     lvl1pt = PTE_PTR(cap_page_table_cap_get_capPTBasePtr(threadRoot));
 
+    printf("setVMRoot, lvl1pt[0x%llx] pa[0x%llx]\n", (unsigned long long) lvl1pt, (unsigned long long) addrFromPPtr(lvl1pt));
     asid = cap_page_table_cap_get_capPTMappedASID(threadRoot);
     find_ret = findVSpaceForASID(asid);
     if (unlikely(find_ret.status != EXCEPTION_NONE || find_ret.vspace_root != lvl1pt)) {

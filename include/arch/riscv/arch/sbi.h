@@ -119,4 +119,17 @@ static inline void sbi_remote_sfence_vma_asid(const unsigned long *hart_mask,
     SBI_CALL_1(SBI_REMOTE_SFENCE_VMA_ASID, (register_t)hart_mask);
 }
 
+#define SBI_SM_CREATE_ENCLAVE   101
+#define SBI_SM_DESTROY_ENCLAVE  102
+#define SBI_SM_ATTEST_ENCLAVE   103
+#define SBI_SM_RUN_ENCLAVE      105
+#define SBI_SM_STOP_ENCLAVE     106
+#define SBI_SM_RESUME_ENCLAVE   107
+#define SBI_SM_EXIT_ENCLAVE     1101
+#define SBI_SM_NOT_IMPLEMENTED  1111
+
+static inline void sbi_stop_enclave(uint64_t request) {
+  SBI_CALL_1(SBI_SM_STOP_ENCLAVE, request);
+}
+
 #endif

@@ -36,11 +36,11 @@ _start:
 
   /* hartid is in a4 */
   li  sp, BIT(CONFIG_KERNEL_STACK_BITS)
-  mul sp, sp, a4
+  mul sp, sp, x0
   la  x1, (kernel_stack_alloc + (BIT(CONFIG_KERNEL_STACK_BITS)))
   add sp, sp, x1
 
-  csrrw x0, sscratch, a4 /* zero sscratch for the init task */
+  csrrw x0, sscratch, x0 //a4 /* zero sscratch for the init task */
 
   /* la sp, (kernel_stack_alloc + BIT(CONFIG_KERNEL_STACK_BITS)) */
   jal init_kernel

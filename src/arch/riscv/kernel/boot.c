@@ -30,6 +30,10 @@
 #include <plat/machine/fdt.h>
 #include <machine.h>
 
+/* Keystone Physical Addresses */
+word_t keystone_paddr_base;
+word_t keystone_paddr_load;
+
 /* pointer to the end of boot code/data in kernel image */
 /* need a fake array to get the pointer from the linker script */
 extern char ki_boot_end[1];
@@ -147,7 +151,7 @@ init_freemem(region_t ui_reg, region_t dtb_reg)
             .end = ui_reg.end
         }
     };
-
+    return;
     for (i = 0; i < MAX_NUM_FREEMEM_REG; i++) {
         ndks_boot.freemem[i] = REG_EMPTY;
     }
@@ -213,9 +217,10 @@ init_cpu(void)
 /* This and only this function initialises the platform. It does NOT initialise any kernel state. */
 
 BOOT_CODE static void
-init_plat(region_t dtb)
+init_plat(paddr_t memstart, uint64_t memsize)
 {
-    parseFDT((void*)dtb.start);
+    keystoneFDT(memstart, memsize);
+    //parseFDT((void*)dtb.start);
     initIRQController();
     initTimer();
 }
@@ -224,18 +229,47 @@ init_plat(region_t dtb)
 
 static BOOT_CODE bool_t
 try_init_kernel(
-    paddr_t ui_p_reg_start,
-    paddr_t ui_p_reg_end,
-    paddr_t dtb_p_reg_start,
-    paddr_t dtb_p_reg_end,
-    uint32_t pv_offset,
-    vptr_t  v_entry
+    uint64_t dummy,
+    paddr_t keystone_dram_base,
+    uint64_t keystone_dram_size,
+    paddr_t keystone_runtime_start,
+    paddr_t keystone_user_start,
+    paddr_t keystone_free_start,
+    vptr_t  keystone_utm_ptr,
+    uint64_t  keystone_utm_size
+    //paddr_t ui_p_reg_start,
+    //paddr_t ui_p_reg_end,
+    //paddr_t dtb_p_reg_start,
+    //paddr_t dtb_p_reg_end,
+    //uint32_t pv_offset,
+    //vptr_t  v_entry
 )
 {
+    (void) dummy;
     cap_t root_cnode_cap;
     cap_t it_pd_cap;
     cap_t it_ap_cap;
     cap_t ipcbuf_cap;
+    
+    /* SeL4 Parameters */
+    paddr_t ui_p_reg_start;
+    paddr_t ui_p_reg_end;
+    paddr_t free_start;
+    paddr_t free_end;
+    uint32_t pv_offset;
+    vptr_t v_entry;
+    /* Keystone Parameters */
+    v_entry = read_sepc();
+    ui_p_reg_start = keystone_user_start;
+    ui_p_reg_end = keystone_user_start + keystone_free_start;
+    free_start = keystone_free_start;
+    free_end = keystone_dram_base + keystone_dram_size;
+   
+    pv_offset = keystone_user_start - 0x10000;
+    
+    keystone_paddr_base = keystone_dram_base;
+    keystone_paddr_load = keystone_runtime_start;
+    
     p_region_t boot_mem_reuse_p_reg = ((p_region_t) {
         kpptr_to_paddr((void*)KERNEL_BASE), kpptr_to_paddr(ki_boot_end)
     });
@@ -244,18 +278,24 @@ try_init_kernel(
         ui_p_reg_start, ui_p_reg_end
     });
     region_t dtb_reg = paddr_to_pptr_reg((p_region_t) {
-        dtb_p_reg_start, dtb_p_reg_end
+        0, 0
     });
     pptr_t bi_frame_pptr;
     vptr_t bi_frame_vptr;
     vptr_t ipcbuf_vptr;
     create_frames_of_region_ret_t create_frames_ret;
 
+    printf("ui_reg [0x%llx-0x%llx]\n",(unsigned long long) ui_reg.start, 
+        (unsigned long long) ui_reg.end);
+    printf("bootmem_reuse [0x%llx-0x%llx]\n",(unsigned long long) boot_mem_reuse_reg.start, 
+        (unsigned long long) boot_mem_reuse_reg.end);
     /* convert from physical addresses to userland vptrs */
     v_region_t ui_v_reg;
     v_region_t it_v_reg;
     ui_v_reg.start = (uint32_t) (ui_p_reg_start - pv_offset);
     ui_v_reg.end   = (uint32_t) (ui_p_reg_end   - pv_offset);
+
+    printf("ui_v_reg [0x%llx-0x%llx]\n", (unsigned long long) ui_v_reg.start, (unsigned long long) ui_v_reg.end);
 
     ipcbuf_vptr = ui_v_reg.end;
     bi_frame_vptr = ipcbuf_vptr + BIT(PAGE_BITS);
@@ -264,16 +304,38 @@ try_init_kernel(
     it_v_reg.start = ui_v_reg.start;
     it_v_reg.end = bi_frame_vptr + BIT(PAGE_BITS);
 
+    printf("it_v_reg [0x%llx-0x%llx]\n", (unsigned long long) it_v_reg.start, (unsigned long long) it_v_reg.end);
+    printf("dram [0x%llx-0x%llx]\n", (unsigned long long) keystone_dram_base,
+        (unsigned long long) keystone_dram_base + keystone_dram_size);
+    printf("runt [0x%llx-0x%llx]\n", (unsigned long long) keystone_runtime_start,
+        (unsigned long long) keystone_user_start);
+    printf("user [0x%llx-0x%llx]\n", (unsigned long long) keystone_user_start,
+        (unsigned long long) keystone_free_start);
+    printf("free [0x%llx] (%d KB)\n", (unsigned long long) free_start,
+        (int) (free_end - free_start)/1024);
+    
+    keystone_map_kernel_window(keystone_dram_base, keystone_dram_base + keystone_dram_size);
     map_kernel_window();
 
     /* initialise the CPU */
     init_cpu();
 
     /* initialize the platform */
-    init_plat(dtb_reg);
+    //init_plat(keystone_dram_base, keystone_dram_size);
+    init_plat(keystone_dram_base, keystone_dram_size);
 
     /* make the free memory available to alloc_region() */
-    init_freemem(ui_reg, dtb_reg);
+    init_freemem(ui_reg, dtb_reg); // this does nothing actually
+
+    region_t cur_reg = ((region_t) {
+        PPTR_BASE, PPTR_BASE + keystone_dram_size
+        });
+    region_t res_reg = paddr_to_pptr_reg((p_region_t) { 
+        keystone_runtime_start, keystone_free_start
+        });
+    cur_reg = insert_region_excluded(cur_reg, res_reg);
+    if(cur_reg.start < cur_reg.end)      
+      assert(insert_region(cur_reg));
 
     /* create the root cnode */
     root_cnode_cap = create_root_cnode();
@@ -383,24 +445,44 @@ try_init_kernel(
 
 BOOT_CODE VISIBLE void
 init_kernel(
-    paddr_t ui_p_reg_start,
-    paddr_t ui_p_reg_end,
-    sword_t pv_offset,
-    vptr_t  v_entry,
-    word_t hartid,
-    paddr_t dtb_output_p
+    uint64_t dummy,
+    paddr_t keystone_dram_base,
+    uint64_t keystone_dram_size,
+    paddr_t keystone_runtime_start,
+    paddr_t keystone_user_start,
+    paddr_t keystone_free_start,
+    vptr_t  keystone_utm_ptr,
+    uint64_t  keystone_utm_size
+    //paddr_t ui_p_reg_start,
+    //paddr_t ui_p_reg_end,
+    //sword_t pv_offset,
+    //vptr_t  v_entry,
+    //word_t hartid,
+    //paddr_t dtb_output_p
 )
 {
-    pptr_t dtb_output = (pptr_t)paddr_to_pptr(dtb_output_p);
+    //pptr_t dtb_output = (pptr_t)paddr_to_pptr(dtb_output_p);
 
+    //(void) dtb_output_p;
+
+    bool_t result = try_init_kernel(dummy,
+                                    keystone_dram_base,
+                                    keystone_dram_size,
+                                    keystone_runtime_start,
+                                    keystone_user_start,
+                                    keystone_free_start,
+                                    keystone_utm_ptr,
+                                    keystone_utm_size);
+
+  /*
     bool_t result = try_init_kernel(ui_p_reg_start,
                                     ui_p_reg_end,
-                                    dtb_output_p,
-                                    dtb_output_p + fdt_size((void*)dtb_output),
+                                    0, //dtb_output_p,
+                                    0, //dtb_output_p + fdt_size((void*)dtb_output),
                                     pv_offset,
                                     v_entry
                                    );
-
+*/
     if (!result) {
         fail ("Kernel init failed for some reason :(");
     }
